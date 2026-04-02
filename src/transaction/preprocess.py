@@ -5,10 +5,33 @@ def load_data(path):
     df = pd.read_csv(path)
     return df
 
+def clean_column_names(df):
+    df = df.copy()
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.lower()
+        .str.replace(" ", "_")
+        .str.replace("(", "")
+        .str.replace(")", "")
+    )
+    return df
+
 def basic_cleaning(df):
     df = df.copy()
     df = df.drop(columns=["transaction_id"], errors="ignore")
     df = df.dropna()
+    return df
+
+def process_time(df):
+    df = df.copy()
+
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["hour"] = df["timestamp"].dt.hour
+        df["day"] = df["timestamp"].dt.day
+        df = df.drop(columns=["timestamp"])
+
     return df
 
 def encode_categorical(df):
@@ -28,18 +51,9 @@ def encode_categorical(df):
         "transaction_status"
     ]
 
-    df = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
+    existing_cols = [col for col in categorical_cols if col in df.columns]
 
-    return df
-
-def process_time(df):
-    df = df.copy()
-
-    if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df["hour"] = df["timestamp"].dt.hour
-        df["day"] = df["timestamp"].dt.day
-        df = df.drop(columns=["timestamp"])
+    df = pd.get_dummies(df, columns=existing_cols, drop_first=True)
 
     return df
 
@@ -53,6 +67,7 @@ def split_features_target(df):
 
 def preprocess_pipeline(path):
     df = load_data(path)
+    df = clean_column_names(df)
     df = basic_cleaning(df)
     df = process_time(df)
     df = encode_categorical(df)
