@@ -1,10 +1,10 @@
 import pandas as pd
-import numpy as np
-from src.transaction.feature_engineering import add_features
+from src.transaction.feature_engineering import create_advanced_features
+
 
 def load_data(path):
-    df = pd.read_csv(path)
-    return df
+    return pd.read_csv(path)
+
 
 def clean_column_names(df):
     df = df.copy()
@@ -18,22 +18,12 @@ def clean_column_names(df):
     )
     return df
 
+
 def basic_cleaning(df):
     df = df.copy()
     df = df.drop(columns=["transaction_id"], errors="ignore")
-    df = df.dropna()
     return df
 
-def process_time(df):
-    df = df.copy()
-
-    if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df["hour"] = df["timestamp"].dt.hour
-        df["day"] = df["timestamp"].dt.day
-        df = df.drop(columns=["timestamp"])
-
-    return df
 
 def encode_categorical(df):
     df = df.copy()
@@ -49,7 +39,8 @@ def encode_categorical(df):
         "device_type",
         "network_type",
         "day_of_week",
-        "transaction_status"
+        "transaction_status",
+        "category_combo"
     ]
 
     existing_cols = [col for col in categorical_cols if col in df.columns]
@@ -58,20 +49,25 @@ def encode_categorical(df):
 
     return df
 
+
 def split_features_target(df):
     df = df.copy()
+    
+    # remove timestamp (model can't use datetime)
+    df = df.drop(columns=["timestamp"], errors="ignore")
 
-    y = df["fraud_flag"]
     X = df.drop(columns=["fraud_flag"])
+    y = df["fraud_flag"]
 
     return X, y
 
-def preprocess_pipeline(path): 
-    df = load_data(path) 
-    df = clean_column_names(df) 
-    df = basic_cleaning(df) 
-    df = process_time(df) 
-    df = add_features(df) 
-    df = encode_categorical(df) 
-    X, y = split_features_target(df) 
+
+def preprocess_pipeline(path):
+    df = load_data(path)
+    df = clean_column_names(df)
+    df = basic_cleaning(df)
+    df = create_advanced_features(df)
+    df = encode_categorical(df)
+    X, y = split_features_target(df)
+
     return X, y
