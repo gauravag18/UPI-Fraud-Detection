@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from src.transaction.feature_engineering import add_features
 
 def load_data(path):
     df = pd.read_csv(path)
@@ -65,11 +66,12 @@ def split_features_target(df):
 
     return X, y
 
-def preprocess_pipeline(path):
-    df = load_data(path)
-    df = clean_column_names(df)
-    df = basic_cleaning(df)
-    df = process_time(df)
-    df = encode_categorical(df)
-    X, y = split_features_target(df)
+def preprocess_pipeline(path): 
+    df = load_data(path) 
+    df = clean_column_names(df) 
+    df = basic_cleaning(df) 
+    df = process_time(df) 
+    df = add_features(df) 
+    df = encode_categorical(df) 
+    X, y = split_features_target(df) 
     return X, y
