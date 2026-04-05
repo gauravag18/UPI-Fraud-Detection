@@ -67,6 +67,9 @@ class FraudDetector:
         X_train = X_train.select_dtypes(exclude=['object'])
         X_test = X_test.select_dtypes(exclude=['object'])
 
+        # Capture feature names for explainability
+        self.feature_names = list(X_train.columns)
+
         # 4. Scaling
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
@@ -168,7 +171,7 @@ class FraudDetector:
 
         X_train, X_test, y_train, y_test = self.prepare_data(X, y)
 
-        print("Training models : ")
+        print("Training models : \n")
         self.train_logistic(X_train, X_test, y_train, y_test)
         self.train_random_forest(X_train, X_test, y_train, y_test)
         self.train_xgboost(X_train, X_test, y_train, y_test)

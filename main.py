@@ -1,10 +1,12 @@
 from src.transaction.train import FraudDetector
 import pandas as pd
+from src.transaction.shap_explain import run_shap
+
 
 def print_results(results):
     df = pd.DataFrame(results).T
 
-    print("FINAL MODEL COMPARISON")
+    print("Model Comparison: \n")
 
     print(df[["pr_auc", "roc_auc", "precision", "recall", "f1"]].round(4))
 
@@ -15,13 +17,19 @@ def print_results(results):
 
 
 def main():
-    DATA_PATH = "transaction_data/upi_transactions_2024.csv"
+    DATA_PATH="transaction_data/upi_transactions_2024.csv"
 
+    print("UPI FRAUD DETECTION PIPELINE\n")
+
+    # Train models
     detector = FraudDetector()
     results = detector.fit_all(DATA_PATH)
 
+    # Print results
     print_results(results)
 
+    # SHAP Explainability
+    run_shap(DATA_PATH, model_name="xgboost")
 
 if __name__ == "__main__":
     main()
