@@ -67,7 +67,6 @@ def preprocess_pipeline(path):
     df = clean_column_names(df)
     df = basic_cleaning(df)
     df = create_advanced_features(df)
-    df = encode_categorical(df)
     X, y = split_features_target(df)
 
     return X, y
