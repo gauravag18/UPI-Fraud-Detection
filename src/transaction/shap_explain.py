@@ -10,11 +10,7 @@ from src.transaction.train import FraudDetector
 
 
 def run_shap(path, model_name="xgboost", sample_size=50):
-    """
-    Explains model predictions using SHAP (SHapley Additive exPlanations).
-    Reconstructs feature names to ensure plots are readable and identifies 
-    which features contribute most to fraud detection.
-    """
+    
     # Load data
     print(f"\nSHAP Explainability for {model_name.upper()}:")
     X, y = preprocess_pipeline(path)
@@ -76,6 +72,7 @@ def run_shap(path, model_name="xgboost", sample_size=50):
     shap.summary_plot(shap_values_to_plot, X_sample, show=False)
     plt.title(f"SHAP Summary: {model_name.upper()} Fraud Drivers")
     plt.tight_layout()
+    plt.savefig(f"docs/shap_summary_{model_name}.png")
     plt.show()
 
     print("\n2. Generating Feature Importance Bar Plot")
@@ -83,6 +80,7 @@ def run_shap(path, model_name="xgboost", sample_size=50):
     shap.summary_plot(shap_values_to_plot, X_sample, plot_type="bar", show=False)
     plt.title(f"Global Feature Importance: {model_name.upper()}")
     plt.tight_layout()
+    plt.savefig(f"docs/shap_importance_{model_name}.png")
     plt.show()
 
     # Print top contributing features summary
@@ -110,7 +108,10 @@ def run_shap(path, model_name="xgboost", sample_size=50):
             shap_values_to_plot[fraud_idx],
             X_sample.iloc[fraud_idx],
             matplotlib=True,
-            show=True
+            show=False
         )
+        plt.tight_layout()
+        plt.savefig(f"docs/shap_force_{model_name}.png")
+        plt.show()
     else:
         print("Note: No fraud cases were found in the explanation sample to show a single-case force plot.")

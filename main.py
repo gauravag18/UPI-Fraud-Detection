@@ -19,8 +19,6 @@ def print_results(results):
 def main():
     DATA_PATH="transaction_data/upi_transactions_2024.csv"
 
-    print("UPI FRAUD DETECTION PIPELINE\n")
-
     # Train models
     detector = FraudDetector()
     results = detector.fit_all(DATA_PATH)

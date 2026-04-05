@@ -20,6 +20,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 
 import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from src.transaction.preprocess import preprocess_pipeline
 
@@ -31,6 +33,7 @@ class FraudDetector:
         self.results = {}
 
         os.makedirs("models", exist_ok=True)
+        os.makedirs("docs", exist_ok=True)
 
     def prepare_data(self, X, y):
         X_train, X_test, y_train, y_test = train_test_split(
@@ -125,8 +128,50 @@ class FraudDetector:
         print(f"Precision: {report['1']['precision']:.4f} | Recall: {report['1']['recall']:.4f} | F1: {report['1']['f1-score']:.4f}")
         print("\n")
 
+        # Save confusion matrix plot
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                    xticklabels=['Normal', 'Fraud'], 
+                    yticklabels=['Normal', 'Fraud'])
+        plt.title(f'Confusion Matrix: {name.upper()}')
+        plt.ylabel('Actual')
+        plt.xlabel('Predicted')
+        plt.tight_layout()
+        plt.savefig(f"docs/cm_{name}.png")
+        plt.close()
+
         # Save model
         joblib.dump(model, f"models/{name}.pkl")
+
+    def plot_metrics_comparison(self):
+        """Generates a bar chart comparing Performance Metrics across all trained models."""
+        if not self.results:
+            return
+
+        metrics_df = pd.DataFrame(self.results).T
+        metrics_to_plot = ["recall", "precision", "f1", "pr_auc"]
+        
+        plt.figure(figsize=(10, 6))
+        metrics_df[metrics_to_plot].plot(kind='bar', figsize=(12, 7))
+        plt.title('Model Performance Comparison')
+        plt.ylabel('Score')
+        plt.xticks(rotation=45)
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.tight_layout()
+        plt.savefig("docs/model_comparison.png")
+        plt.close()
+
+        # Specifically save a dedicated Recall Comparison for visibility
+        plt.figure(figsize=(10, 6))
+        sns.barplot(x=metrics_df.index, y=metrics_df['recall'], palette='viridis')
+        plt.title('Recall Comparison (Fraud Detection - Higher is Better)')
+        plt.ylabel('Recall Score')
+        plt.ylim(0, 1.1)
+        for i, v in enumerate(metrics_df['recall']):
+            plt.text(i, v + 0.02, f'{v:.4f}', ha='center')
+        plt.tight_layout()
+        plt.savefig("docs/recall_comparison.png")
+        plt.close()
 
     def train_logistic(self, X_train, X_test, y_train, y_test):
         model = LogisticRegression(class_weight='balanced', max_iter=2000)
@@ -175,5 +220,8 @@ class FraudDetector:
         self.train_logistic(X_train, X_test, y_train, y_test)
         self.train_random_forest(X_train, X_test, y_train, y_test)
         self.train_xgboost(X_train, X_test, y_train, y_test)
+
+        # Generate comparison plots
+        self.plot_metrics_comparison()
 
         return self.results
