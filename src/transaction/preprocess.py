@@ -1,72 +1,61 @@
+"""
+Loads and cleans the UPI transactions CSV.
+Encoding is deferred to train.py to prevent target-leakage.
+"""
+
 import pandas as pd
 from src.transaction.feature_engineering import create_advanced_features
 
 
-def load_data(path):
+def load_data(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-def clean_column_names(df):
+def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = (
         df.columns
         .str.strip()
         .str.lower()
-        .str.replace(" ", "_")
-        .str.replace("(", "")
-        .str.replace(")", "")
+        .str.replace(r"[\s\(\)]+", "_", regex=True)
+        .str.strip("_")
     )
     return df
 
 
-def basic_cleaning(df):
+def basic_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df = df.drop(columns=["transaction_id"], errors="ignore")
+    str_cols = df.select_dtypes(include="object").columns
+    for col in str_cols:
+        df[col] = df[col].str.strip()
+    # Rename columns to canonical names used throughout the codebase
+    rename_map = {
+        "amount_inr_": "amount_inr",
+        "transaction_type": "transaction_type",
+    }
+    # Handle "amount (INR)" → "amount_inr" after clean_column_names
+    if "amount_inr_" in df.columns:
+        df = df.rename(columns={"amount_inr_": "amount_inr"})
     return df
 
 
-def encode_categorical(df):
+def split_features_target(df: pd.DataFrame):
     df = df.copy()
-
-    categorical_cols = [
-        "transaction_type",
-        "merchant_category",
-        "sender_age_group",
-        "receiver_age_group",
-        "sender_state",
-        "sender_bank",
-        "receiver_bank",
-        "device_type",
-        "network_type",
-        "day_of_week",
-        "transaction_status",
-        "category_combo"
-    ]
-
-    existing_cols = [col for col in categorical_cols if col in df.columns]
-
-    df = pd.get_dummies(df, columns=existing_cols, drop_first=True)
-
-    return df
-
-
-def split_features_target(df):
-    df = df.copy()
-    
-    # remove timestamp (model can't use datetime)
     df = df.drop(columns=["timestamp"], errors="ignore")
-
     X = df.drop(columns=["fraud_flag"])
     y = df["fraud_flag"]
-
     return X, y
 
 
-def preprocess_pipeline(path):
+def preprocess_pipeline(path: str):
+    """
+    Full pipeline:
+      load → clean columns → basic cleaning → feature engineering → X/y split
+    """
     df = load_data(path)
     df = clean_column_names(df)
     df = basic_cleaning(df)
     df = create_advanced_features(df)
     X, y = split_features_target(df)
-
     return X, y

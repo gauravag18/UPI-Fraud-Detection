@@ -1,117 +1,199 @@
-import shap
-import joblib
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+""""
+
+Generates:
+  docs/shap_summary.png        — beeswarm summary of all features
+  docs/shap_bar.png            — mean |SHAP| feature importance
+  docs/shap_waterfall_fraud.png — waterfall for one fraudulent transaction
+  docs/shap_waterfall_legit.png — waterfall for one legitimate transaction
+  docs/shap_dependence_top1.png — dependence plot for the top feature
+"""
+
 import os
+import warnings
+import numpy as np
+import pandas as pd
+import joblib
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import shap
 
+from sklearn.model_selection import train_test_split
 from src.transaction.preprocess import preprocess_pipeline
-from src.transaction.train import FraudDetector
+from src.transaction.train import (
+    TARGET_COLS, OHE_COLS, SMOOTH_FACTOR, RANDOM_STATE, TEST_SIZE,
+    VAL_SIZE,
+)
+
+warnings.filterwarnings("ignore")
 
 
-def run_shap(path, model_name="xgboost", sample_size=50):
-    
-    # Load data
-    print(f"\nSHAP Explainability for {model_name.upper()}:")
+def _prepare_test_set(path: str, model_dir: str = "models"):
+    """Re-creates the exact test set used during training (same seed)."""
     X, y = preprocess_pipeline(path)
 
-    # Use same preprocessing as training
-    detector = FraudDetector()
-    X_train, X_test, y_train, y_test = detector.prepare_data(X, y)
+    scaler         = joblib.load(os.path.join(model_dir, "scaler.pkl"))
+    feature_names  = joblib.load(os.path.join(model_dir, "feature_names.pkl"))
+    iso            = joblib.load(os.path.join(model_dir, "iso_forest.pkl"))
 
-    # Convert y_test to Series if it's numpy from prepare_data (though it's returned as y_test from split)
-    if isinstance(y_test, np.ndarray):
-        y_test = pd.Series(y_test)
+    # Replicate the train/test split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE,
+    )
+    X_tr, X_val, y_tr, y_val = train_test_split(
+        X_train, y_train, test_size=VAL_SIZE,
+        stratify=y_train, random_state=RANDOM_STATE,
+    )
 
-    # Load trained model
-    model_path = f"models/{model_name}.pkl"
-    if not os.path.exists(model_path):
-        print(f"Model {model_name} not found at {model_path}. Please train it first.")
-        return
-
-    model = joblib.load(model_path)
-
-    # Take a sample for explanation (SHAP can be slow on large datasets)
-    # Ensure we include fraud cases in the sample for more meaningful analysis
-    fraud_indices = np.where(y_test == 1)[0]
-    non_fraud_indices = np.where(y_test == 0)[0]
-    
-    # Stratified sample: prioritize fraud cases if available
-    n_fraud = min(len(fraud_indices), sample_size // 2)
-    n_normal = min(len(non_fraud_indices), sample_size - n_fraud)
-    
-    if len(fraud_indices) > 0 and len(non_fraud_indices) > 0:
-        selected_indices = np.concatenate([
-            np.random.choice(fraud_indices, n_fraud, replace=False),
-            np.random.choice(non_fraud_indices, n_normal, replace=False)
-        ])
-    else:
-        selected_indices = np.arange(min(sample_size, len(X_test)))
-    
-    X_sample_scaled = X_test[selected_indices]
-    y_sample = y_test.iloc[selected_indices] if hasattr(y_test, 'iloc') else y_test[selected_indices]
-
-    # RECONSTRUCT DataFrame with Feature Names for plot labels
-    X_sample = pd.DataFrame(X_sample_scaled, columns=detector.feature_names)
-
-    # Use TreeExplainer optimized for XGBoost
-    print("Calculating SHAP values using TreeExplainer:")
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X_sample)
-
-    # XGBoost binary classification often returns a single array for class 1
-    # but sometimes (depending on version/params) a list [class_0, class_1]
-    if isinstance(shap_values, list) and len(shap_values) == 2:
-        shap_values_to_plot = shap_values[1]
-    else:
-        shap_values_to_plot = shap_values
-
-    # PLOTS 
-    print("\n1. Generating SHAP Summary Plot")
-    plt.figure(figsize=(10, 8))
-    shap.summary_plot(shap_values_to_plot, X_sample, show=False)
-    plt.title(f"SHAP Summary: {model_name.upper()} Fraud Drivers")
-    plt.tight_layout()
-    plt.savefig(f"docs/shap_summary_{model_name}.png")
-    plt.show()
-
-    print("\n2. Generating Feature Importance Bar Plot")
-    plt.figure(figsize=(10, 8))
-    shap.summary_plot(shap_values_to_plot, X_sample, plot_type="bar", show=False)
-    plt.title(f"Global Feature Importance: {model_name.upper()}")
-    plt.tight_layout()
-    plt.savefig(f"docs/shap_importance_{model_name}.png")
-    plt.show()
-
-    # Print top contributing features summary
-    global_importance = np.abs(shap_values_to_plot).mean(0)
-    top_indices = np.argsort(global_importance)[::-1][:5]
-    print("\nTOP 5 FRAUD INDICATORS (Global)")
-    for i, idx in enumerate(top_indices):
-        print(f"{i+1}. {X_sample.columns[idx]:<30} | Magnitude: {global_importance[idx]:.4f}")
-
-    # Single prediction explanation for the first Fraud case in sample
-    fraud_cases_in_sample = np.where(y_sample == 1)[0]
-    if len(fraud_cases_in_sample) > 0:
-        fraud_idx = fraud_cases_in_sample[0]
-        print(f"3. Explaining a specific Fraudulent transaction (Sample Index {fraud_idx}):")
-        
-        # Determine base value (expected value)
-        if isinstance(explainer.expected_value, (list, np.ndarray)) and len(explainer.expected_value) == 2:
-            base_val = explainer.expected_value[1]
-        else:
-            base_val = explainer.expected_value
-
-        plt.figure()
-        shap.force_plot(
-            base_val,
-            shap_values_to_plot[fraud_idx],
-            X_sample.iloc[fraud_idx],
-            matplotlib=True,
-            show=False
+    # Target encoding — must happen BEFORE OHE (same order as train.py)
+    global_mean = float(y_tr.mean())
+    for col in TARGET_COLS:
+        if col not in X_tr.columns:
+            continue
+        agg = y_tr.groupby(X_tr[col]).agg(["count", "mean"])
+        smoothed = (
+            (agg["count"] * agg["mean"] + SMOOTH_FACTOR * global_mean)
+            / (agg["count"] + SMOOTH_FACTOR)
         )
-        plt.tight_layout()
-        plt.savefig(f"docs/shap_force_{model_name}.png")
-        plt.show()
+        X_tr[f"{col}_risk"]   = X_tr[col].map(smoothed).fillna(global_mean)
+        X_test[f"{col}_risk"] = X_test[col].map(smoothed).fillna(global_mean)
+
+    # OHE
+    existing_ohe = [c for c in OHE_COLS if c in X_tr.columns]
+    X_tr_ohe   = pd.get_dummies(X_tr,   columns=existing_ohe, drop_first=True)
+    X_test_ohe = pd.get_dummies(X_test, columns=existing_ohe, drop_first=True)
+    X_tr_ohe, X_test_ohe = X_tr_ohe.align(X_test_ohe, join="left", axis=1, fill_value=0)
+
+    X_test_ohe = X_test_ohe.select_dtypes(exclude=["object"])
+    # Align to exactly the features seen during training
+    missing = [f for f in feature_names if f not in X_test_ohe.columns]
+    for f in missing:
+        X_test_ohe[f] = 0.0
+    X_test_sc  = scaler.transform(X_test_ohe[feature_names])
+
+    iso_scores = (-iso.decision_function(X_test_sc)).reshape(-1, 1)
+    X_test_sc  = np.hstack([X_test_sc, iso_scores])
+
+    feature_names_ext = feature_names + ["iso_anomaly_score"]
+    return X_test_sc, y_test, feature_names_ext
+
+
+def run_shap(path: str, model_name: str = "lightgbm",
+             model_dir: str = "models", docs_dir: str = "docs") -> None:
+
+    os.makedirs(docs_dir, exist_ok=True)
+
+    print(f"\nSHAP Explainability for {model_name.upper()}:")
+
+    model         = joblib.load(os.path.join(model_dir, f"{model_name}.pkl"))
+    X_test_sc, y_test, feature_names = _prepare_test_set(path, model_dir)
+
+    print("  Computing SHAP values ...")
+    if model_name in ("xgboost", "lightgbm", "rf"):
+        explainer   = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_test_sc)
+        # LightGBM returns list [neg_class, pos_class] for binary
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]
+        expected_value = (
+            explainer.expected_value[1]
+            if isinstance(explainer.expected_value, (list, np.ndarray))
+            else explainer.expected_value
+        )
     else:
-        print("Note: No fraud cases were found in the explanation sample to show a single-case force plot.")
+        explainer   = shap.LinearExplainer(model, X_test_sc)
+        shap_values = explainer.shap_values(X_test_sc)
+        expected_value = explainer.expected_value
+
+    #  1. SUMMARY 
+    print("  1. Generating SHAP Summary Plot ...")
+    plt.figure(figsize=(11, 8))
+    shap.summary_plot(
+        shap_values, X_test_sc,
+        feature_names=feature_names,
+        max_display=20,
+        show=False,
+    )
+    plt.title(f"SHAP Summary — {model_name.upper()}", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(os.path.join(docs_dir, "shap_summary.png"), dpi=130, bbox_inches="tight")
+    plt.close()
+
+    # 2. BAR PLOT 
+    print("  2. Generating Feature Importance Bar Plot ...")
+    plt.figure(figsize=(10, 8))
+    shap.summary_plot(
+        shap_values, X_test_sc,
+        feature_names=feature_names,
+        plot_type="bar",
+        max_display=20,
+        show=False,
+    )
+    plt.title(f"Mean |SHAP| Importance — {model_name.upper()}", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(os.path.join(docs_dir, "shap_bar.png"), dpi=130, bbox_inches="tight")
+    plt.close()
+
+    #  3. TOP FEATURES 
+    mean_abs_shap = np.abs(shap_values).mean(axis=0)
+    top_idx       = np.argsort(mean_abs_shap)[::-1]
+    print("\n  TOP 10 FRAUD INDICATORS (by mean |SHAP|):")
+    for rank, i in enumerate(top_idx[:10], 1):
+        print(f"    {rank:>2}. {feature_names[i]:<40} {mean_abs_shap[i]:.5f}")
+
+    #  4. WATERFALL — one FRAUD transaction 
+    print("\n  3. Waterfall plot for a fraudulent transaction ...")
+    y_test_arr   = np.asarray(y_test)
+    fraud_indices = np.where(y_test_arr == 1)[0]
+
+    if len(fraud_indices) > 0:
+        idx = fraud_indices[0]
+        expl_obj = shap.Explanation(
+            values        = shap_values[idx],
+            base_values   = expected_value,
+            data          = X_test_sc[idx],
+            feature_names = feature_names,
+        )
+        plt.figure(figsize=(10, 8))
+        shap.plots.waterfall(expl_obj, max_display=15, show=False)
+        plt.title("SHAP Waterfall — Fraudulent Transaction", fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        plt.savefig(os.path.join(docs_dir, "shap_waterfall_fraud.png"),
+                    dpi=130, bbox_inches="tight")
+        plt.close()
+
+    # 5. WATERFALL — one LEGIT transaction 
+    print("  4. Waterfall plot for a legitimate transaction ...")
+    legit_indices = np.where(y_test_arr == 0)[0]
+    if len(legit_indices) > 0:
+        idx = legit_indices[0]
+        expl_obj = shap.Explanation(
+            values        = shap_values[idx],
+            base_values   = expected_value,
+            data          = X_test_sc[idx],
+            feature_names = feature_names,
+        )
+        plt.figure(figsize=(10, 8))
+        shap.plots.waterfall(expl_obj, max_display=15, show=False)
+        plt.title("SHAP Waterfall — Legitimate Transaction", fontsize=12, fontweight="bold")
+        plt.tight_layout()
+        plt.savefig(os.path.join(docs_dir, "shap_waterfall_legit.png"),
+                    dpi=130, bbox_inches="tight")
+        plt.close()
+
+    #  6. DEPENDENCE PLOT — top feature 
+    print("  5. Dependence plot for top feature ...")
+    top_feature = feature_names[top_idx[0]]
+    plt.figure(figsize=(9, 6))
+    shap.dependence_plot(
+        top_idx[0], shap_values, X_test_sc,
+        feature_names=feature_names,
+        show=False,
+    )
+    plt.title(f"SHAP Dependence — {top_feature}", fontsize=12, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(os.path.join(docs_dir, "shap_dependence_top1.png"),
+                dpi=130, bbox_inches="tight")
+    plt.close()
+
+    print(f"\n  All SHAP plots saved to '{docs_dir}/'")
